@@ -84,6 +84,15 @@ Parameters:
       - 'sse'
       - 'streamable-http'
     Description: 'Transport protocol for the MCP server (sse recommended for containers)'
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: 'VPC ID where the ECS service will run'
+  
+  AllowedCidrBlocks:
+    Type: CommaDelimitedList
+    Default: '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
+    Description: 'Comma-delimited list of CIDR blocks allowed to access the Falcon MCP service'
 
 Resources:
   # ================================
@@ -169,6 +178,58 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-ecs-logs"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # Security Group for ECS Service
+  # ================================
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-ecs-sg-${Environment}"
+      GroupDescription: !Sub "Security group for ${ProjectName} ECS service"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: !Select [0, !Ref AllowedCidrBlocks]
+          Description: "Allow inbound traffic to Falcon MCP service from first CIDR block"
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: !Select [1, !Ref AllowedCidrBlocks]
+          Description: "Allow inbound traffic to Falcon MCP service from second CIDR block"
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: !Select [2, !Ref AllowedCidrBlocks]
+          Description: "Allow inbound traffic to Falcon MCP service from third CIDR block"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "Allow HTTPS outbound for CrowdStrike API calls"
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: "Allow HTTP outbound for health checks and updates"
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "Allow DNS over TCP"
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "Allow DNS over UDP"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-security-group"
         - Key: Environment
           Value: !Ref Environment
 
@@ -270,3 +331,15 @@ Outputs:
     Value: !Sub "${ECRRepositoryURI}:${ImageTag}"
     Export:
       Name: !Sub "${ProjectName}-container-image-${Environment}"
+
+  ECSSecurityGroupId:
+    Description: ID of the ECS Security Group
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-ecs-security-group-id-${Environment}"
+
+  ECSSecurityGroupArn:
+    Description: ARN of the ECS Security Group
+    Value: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${ECSSecurityGroup}"
+    Export:
+      Name: !Sub "${ProjectName}-ecs-security-group-arn-${Environment}"
