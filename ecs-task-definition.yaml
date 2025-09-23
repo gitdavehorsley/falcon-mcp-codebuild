@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Task Definition for Falcon MCP Server'
+
+Parameters:
+  ECRRepositoryURI:
+    Type: String
+    Description: 'ECR Repository URI for the Falcon MCP Docker image (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/falcon-mcp:latest)'
+  
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+  
+  ProjectName:
+    Type: String
+    Default: falcon-mcp
+    Description: Name of the project
+  
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Docker image tag to use
+  
+  TaskCpu:
+    Type: String
+    Default: '256'
+    AllowedValues:
+      - '256'
+      - '512'
+      - '1024'
+      - '2048'
+      - '4096'
+    Description: 'CPU units for the task (256 = 0.25 vCPU)'
+  
+  TaskMemory:
+    Type: String
+    Default: '512'
+    AllowedValues:
+      - '512'
+      - '1024'
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Description: 'Memory (in MiB) for the task'
+  
+  ContainerPort:
+    Type: Number
+    Default: 3000
+    Description: 'Port that the Falcon MCP server listens on'
+
+Resources:
+  # ================================
+  # ECS Task Execution Role
+  # ================================
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ecs-execution-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECRAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-execution-role"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # ECS Task Role (for application permissions)
+  # ================================
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ecs-task-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FalconMCPPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Add any AWS permissions that the Falcon MCP server needs
+              # This is a placeholder - adjust based on actual requirements
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-task-role"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # CloudWatch Log Group
+  # ================================
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-logs"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # ECS Task Definition
+  # ================================
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${ProjectName}-container"
+          Image: !Sub "${ECRRepositoryURI}:${ImageTag}"
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: NODE_ENV
+              Value: !Ref Environment
+            - Name: PORT
+              Value: !Ref ContainerPort
+          # Health check configuration
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - !Sub "curl -f http://localhost:${ContainerPort}/health || exit 1"
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+          # Resource requirements
+          Memory: !Ref TaskMemory
+          MemoryReservation: !Ref TaskMemory
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-task-definition"
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ECSTaskDefinitionArn:
+    Description: ARN of the ECS Task Definition
+    Value: !Ref ECSTaskDefinition
+    Export:
+      Name: !Sub "${ProjectName}-task-definition-arn-${Environment}"
+
+  ECSTaskDefinitionFamily:
+    Description: Family name of the ECS Task Definition
+    Value: !Sub "${ProjectName}-${Environment}"
+    Export:
+      Name: !Sub "${ProjectName}-task-definition-family-${Environment}"
+
+  ECSTaskExecutionRoleArn:
+    Description: ARN of the ECS Task Execution Role
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ecs-execution-role-arn-${Environment}"
+
+  ECSTaskRoleArn:
+    Description: ARN of the ECS Task Role
+    Value: !GetAtt ECSTaskRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ecs-task-role-arn-${Environment}"
+
+  ECSLogGroupName:
+    Description: Name of the CloudWatch Log Group
+    Value: !Ref ECSLogGroup
+    Export:
+      Name: !Sub "${ProjectName}-ecs-log-group-${Environment}"
+
+  ContainerImage:
+    Description: Container image used in the task definition
+    Value: !Sub "${ECRRepositoryURI}:${ImageTag}"
+    Export:
+      Name: !Sub "${ProjectName}-container-image-${Environment}"
