@@ -98,6 +98,7 @@ The build environment includes standard CodeBuild variables:
 - `AWS_ACCOUNT_ID` - Current AWS account ID
 - `IMAGE_REPO_NAME` - ECR repository name
 - `IMAGE_TAG` - Docker image tag (default: latest)
+- `DOCKER_BUILDKIT=1` - Enables Docker BuildKit for advanced Dockerfile features
 
 ## Caching
 

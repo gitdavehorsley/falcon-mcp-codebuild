@@ -72,10 +72,6 @@ Resources:
         EnvironmentVariables:
           - Name: ENVIRONMENT
             Value: !Ref Environment
-          - Name: UV_COMPILE_BYTECODE
-            Value: "1"
-          - Name: UV_LINK_MODE
-            Value: copy
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
           - Name: AWS_ACCOUNT_ID
@@ -84,8 +80,8 @@ Resources:
             Value: !Ref ProjectName
           - Name: IMAGE_TAG
             Value: !Ref ImageTag
-          - Name: CREATE_ECR
-            Value: "true"
+          - Name: DOCKER_BUILDKIT
+            Value: "1"
       Source:
         Type: GITHUB
         Location: https://github.com/CrowdStrike/falcon-mcp
