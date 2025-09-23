@@ -11,6 +11,8 @@ This repository contains AWS CloudFormation templates and build specifications f
 
 - `buildspec.yml` - Build specification file that defines the build phases and commands
 
+- `Dockerfile` - Multi-stage Docker build file for creating containerized Falcon MCP images
+
 ## Parameters
 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
@@ -152,11 +154,21 @@ When ECR is enabled (`CreateECRRepository=true`), the template provides:
 - **Build Integration**: Automatically builds and pushes Docker images if a Dockerfile is present
 - **Image Tagging**: Tags images with both the specified tag and commit hash
 
+### Dockerfile Overview:
+The included `Dockerfile` implements a multi-stage build optimized for the Falcon MCP project:
+
+- **Stage 1 (uv)**: Uses Astral's uv for ultra-fast Python dependency management
+- **Dependencies**: Locks and installs dependencies using uv's efficient caching
+- **Cleanup**: Removes unnecessary files from virtual environment
+- **Stage 2 (runtime)**: Uses Python 3.13 Alpine for minimal runtime image
+- **Security**: Runs as non-root user 'app'
+- **Optimization**: Enables bytecode compilation and uses copy mode for caching
+
 ### Build Behavior:
 - If a `Dockerfile` is present in the source repository, the build will:
   1. Build the Python package with `uv build`
   2. Authenticate with ECR
-  3. Build the Docker image
+  3. Build the Docker image using multi-stage build
   4. Tag with both the specified tag and short commit hash
   5. Push both tags to ECR
   6. Generate `imagedefinitions.json` for CodePipeline integration
