@@ -1,6 +1,6 @@
 # Falcon MCP CodeBuild
 
-This repository contains AWS CloudFormation templates and build specifications for deploying a CodeBuild project for the CrowdStrike Falcon MCP Server with flexible source control options.
+This repository contains AWS CloudFormation templates and build specifications for deploying a CodeBuild project for the CrowdStrike Falcon MCP Server.
 
 ## Files
 
@@ -13,15 +13,9 @@ This repository contains AWS CloudFormation templates and build specifications f
 ## Parameters
 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
-- `ProjectName` (String): Name of the CodeBuild project, ECR repository, and CodeCommit repository. Default: falcon-mcp
+- `ProjectName` (String): Name of the CodeBuild project and ECR repository. Default: falcon-mcp
 - `ImageTag` (String): Docker image tag to use for the built image. Default: latest
-
-## Prerequisites
-
-**Create a CodeCommit repository (name must match ProjectName parameter):**
-```bash
-aws codecommit create-repository --repository-name falcon-mcp
-```
+- `GitHubRepoUrl` (String): GitHub repository URL (e.g., https://github.com/username/repo-name)
 
 ## Quick Deploy
 
@@ -29,7 +23,8 @@ aws codecommit create-repository --repository-name falcon-mcp
 aws cloudformation deploy \
   --template-file template-fixed.yaml \
   --stack-name falcon-mcp-codebuild-dev \
-  --capabilities CAPABILITY_IAM
+  --parameter-overrides GitHubRepoUrl=https://github.com/your-username/falcon-mcp \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
 ```
 
 ## What It Does
@@ -37,7 +32,7 @@ aws cloudformation deploy \
 The template creates a complete CI/CD pipeline:
 
 1. **ECR Repository**: Automatically created with lifecycle policies (keeps last 10 images)
-2. **CodeBuild Project**: Configured for CodeCommit with webhook triggers on push to main branch
+2. **CodeBuild Project**: Configured for GitHub with webhook triggers on push to main branch
 3. **Automated Build Process**:
    - Runs Python tests (ruff, mypy, black, pytest)
    - Builds Python package with uv
@@ -70,15 +65,15 @@ docker pull your-account-id.dkr.ecr.your-region.amazonaws.com/falcon-mcp:latest
 The CloudFormation template creates:
 1. **ECR Repository**: For storing Docker images with automatic lifecycle management
 2. **CodeBuild Project**: With embedded BuildSpec and Dockerfile for complete automation
-3. **IAM Role**: With CodeCommit and ECR permissions for seamless operation
+3. **IAM Role**: With ECR permissions for seamless operation
 4. **CloudWatch Logs**: For build monitoring and troubleshooting
-5. **Webhook Triggers**: Automatic builds on CodeCommit push to main branch
+5. **GitHub Webhooks**: Automatic builds triggered on GitHub push to main branch
 
 **Self-Contained & Simple**: Everything is embedded in the template - no external files or complex configurations needed.
 
 ## Build Process
 
-Complete automated pipeline that runs on every CodeCommit push:
+Complete automated pipeline that runs on every GitHub push to main:
 
 1. **Install Phase**: Sets up Python 3.13 and installs uv package manager
 2. **Pre-build Phase**: Locks dependencies and prepares virtual environment

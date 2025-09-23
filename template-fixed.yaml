@@ -14,12 +14,16 @@ Parameters:
   ProjectName:
     Type: String
     Default: falcon-mcp
-    Description: Name of the CodeBuild project, ECR repository, and CodeCommit repository
+    Description: Name of the CodeBuild project and ECR repository
 
   ImageTag:
     Type: String
     Default: latest
     Description: Docker image tag to use for the built image
+
+  GitHubRepoUrl:
+    Type: String
+    Description: GitHub repository URL (e.g., https://github.com/username/repo-name)
 
 Resources:
   # ================================
@@ -87,8 +91,8 @@ Resources:
           - Name: CREATE_ECR
             Value: "true"
       Source:
-        Type: CODECOMMIT
-        Location: !Sub "https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${ProjectName}"
+        Type: GITHUB
+        Location: !Ref GitHubRepoUrl
         GitCloneDepth: 1
         BuildSpec: |
           version: 0.2
@@ -234,10 +238,6 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: '*'
-              - Effect: Allow
-                Action:
-                  - codecommit:GitPull
-                Resource: !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${ProjectName}"
               - Effect: Allow
                 Action:
                   - ecr:BatchCheckLayerAvailability
