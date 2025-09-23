@@ -20,6 +20,9 @@ This repository contains AWS CloudFormation templates and build specifications f
 - `S3Bucket` (String): S3 bucket name for source code (required when SourceType is S3). Default: ""
 - `S3Key` (String): S3 object key for source code (used when SourceType is S3). Default: source.zip
 - `GitHubTokenSecretArn` (String): ARN of the AWS Secrets Manager secret containing the GitHub personal access token (required when SourceType is GITHUB). Default: ""
+- `CreateECRRepository` (String): Whether to create an ECR repository for Docker images ("true" or "false"). Default: "true"
+- `ECRRepositoryName` (String): Name of the ECR repository (defaults to ProjectName if empty). Default: ""
+- `ImageTag` (String): Docker image tag to use for the built image. Default: latest
 
 ## Source Control Options
 
@@ -123,17 +126,69 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM
 ```
 
+### Deploy with ECR Support (Recommended for Docker deployment):
+```bash
+aws cloudformation deploy \
+  --template-file template.yaml \
+  --stack-name falcon-mcp-codebuild-dev \
+  --parameter-overrides \
+    Environment=dev \
+    ProjectName=falcon-mcp \
+    SourceType=CODECOMMIT \
+    RepositoryUrl=https://git-codecommit.region.amazonaws.com/v1/repos/falcon-mcp \
+    CreateECRRepository=true \
+    ECRRepositoryName=falcon-mcp \
+    ImageTag=latest \
+  --capabilities CAPABILITY_IAM
+```
+
+## ECR Integration
+
+When ECR is enabled (`CreateECRRepository=true`), the template provides:
+
+### Features:
+- **ECR Repository**: Created with lifecycle policies (keeps last 10 images)
+- **Docker Image Scanning**: Automated security scanning on push
+- **Build Integration**: Automatically builds and pushes Docker images if a Dockerfile is present
+- **Image Tagging**: Tags images with both the specified tag and commit hash
+
+### Build Behavior:
+- If a `Dockerfile` is present in the source repository, the build will:
+  1. Build the Python package with `uv build`
+  2. Authenticate with ECR
+  3. Build the Docker image
+  4. Tag with both the specified tag and short commit hash
+  5. Push both tags to ECR
+  6. Generate `imagedefinitions.json` for CodePipeline integration
+
+### Manual Build Trigger:
+```bash
+# Trigger build with ECR support
+aws codebuild start-build --project-name falcon-mcp-dev
+```
+
+### ECR Repository Access:
+After deployment, you can access the ECR repository:
+```bash
+# Login to ECR
+aws ecr get-login-password --region your-region | docker login --username AWS --password-stdin your-account-id.dkr.ecr.your-region.amazonaws.com
+
+# Pull the image
+docker pull your-account-id.dkr.ecr.your-region.amazonaws.com/falcon-mcp:latest
+```
+
 ## Architecture
 
 The CloudFormation template creates:
 1. A CodeBuild project with configurable source (AWS CodeCommit, S3, or GitHub)
 2. Automatic webhooks for Git-based sources (CodeCommit/GitHub) that trigger on main branch pushes
-3. An IAM service role with appropriate permissions based on source type
-4. A CloudWatch log group for storing build logs
+3. An optional ECR repository for Docker image storage with lifecycle policies
+4. An IAM service role with appropriate permissions based on source type and ECR requirements
+5. A CloudWatch log group for storing build logs
 
 ## Build Process
 
-The build process mirrors the Docker build from the source repository and includes:
+The build process includes Python package building and optional Docker image creation:
 
 - **Install Phase**: Installs uv (Python package manager) and sets up Python 3.13 runtime
 - **Pre-build Phase**: Locks dependencies and syncs the virtual environment
@@ -142,7 +197,9 @@ The build process mirrors the Docker build from the source repository and includ
   - Performs type checking with mypy
   - Checks code formatting with black
   - Runs tests with pytest
-- **Post-build Phase**: Creates distribution packages with `uv build`
+- **Post-build Phase**:
+  - **Python Build**: Creates distribution packages with `uv build`
+  - **Docker Build (when ECR enabled)**: Builds and pushes Docker images to ECR if a Dockerfile is present
 
 ## Environment Variables
 
