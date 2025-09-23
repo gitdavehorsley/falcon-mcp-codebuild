@@ -4,11 +4,11 @@ This repository contains AWS CloudFormation templates and build specifications f
 
 ## Files
 
-- `template.yaml` - Main CloudFormation template that creates:
+- `template-fixed.yaml` - **THE ONLY TEMPLATE TO USE** - Clean CloudFormation template that creates:
   - AWS CodeBuild project with embedded BuildSpec and Dockerfile
   - IAM role with necessary permissions
   - CloudWatch log group for build logs
-  - Optional ECR repository for Docker images
+  - ECR repository for Docker images
 
 ## Parameters
 
