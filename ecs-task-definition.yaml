@@ -55,6 +55,21 @@ Parameters:
     Type: Number
     Default: 3000
     Description: 'Port that the Falcon MCP server listens on'
+  
+  FalconClientId:
+    Type: String
+    NoEcho: true
+    Description: 'CrowdStrike Falcon API Client ID'
+  
+  FalconClientSecret:
+    Type: String
+    NoEcho: true
+    Description: 'CrowdStrike Falcon API Client Secret'
+  
+  FalconBaseUrl:
+    Type: String
+    Default: 'https://api.crowdstrike.com'
+    Description: 'CrowdStrike Falcon API Base URL'
 
 Resources:
   # ================================
@@ -175,6 +190,12 @@ Resources:
               Value: !Ref Environment
             - Name: PORT
               Value: !Ref ContainerPort
+            - Name: FALCON_CLIENT_ID
+              Value: !Ref FalconClientId
+            - Name: FALCON_CLIENT_SECRET
+              Value: !Ref FalconClientSecret
+            - Name: FALCON_BASE_URL
+              Value: !Ref FalconBaseUrl
           # Health check configuration
           HealthCheck:
             Command:
