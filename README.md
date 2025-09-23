@@ -1,11 +1,11 @@
 # Falcon MCP CodeBuild
 
-This repository contains AWS CloudFormation templates and build specifications for deploying a CodeBuild project for the CrowdStrike Falcon MCP Server.
+This repository contains AWS CloudFormation templates for deploying a CodeBuild project that builds Docker images from the [CrowdStrike Falcon MCP Server](https://github.com/CrowdStrike/falcon-mcp) source repository.
 
 ## Files
 
-- `template-fixed.yaml` - **THE ONLY TEMPLATE TO USE** - Clean CloudFormation template that creates:
-  - AWS CodeBuild project with embedded BuildSpec and Dockerfile
+- `template-fixed.yaml` - **THE ONLY TEMPLATE TO USE** - Simplified CloudFormation template that creates:
+  - AWS CodeBuild project that uses the existing Dockerfile from CrowdStrike's repository
   - IAM role with necessary permissions
   - CloudWatch log group for build logs
   - ECR repository for Docker images
@@ -15,7 +15,7 @@ This repository contains AWS CloudFormation templates and build specifications f
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
 - `ProjectName` (String): Name of the CodeBuild project and ECR repository. Default: falcon-mcp
 - `ImageTag` (String): Docker image tag to use for the built image. Default: latest
-- `GitHubRepoUrl` (String): GitHub repository URL (e.g., https://github.com/username/repo-name)
+- `GitHubRepoUrl` (String): GitHub repository URL. Default: https://github.com/CrowdStrike/falcon-mcp
 
 ## Quick Deploy
 
@@ -23,28 +23,28 @@ This repository contains AWS CloudFormation templates and build specifications f
 aws cloudformation deploy \
   --template-file template-fixed.yaml \
   --stack-name falcon-mcp-codebuild-dev \
-  --parameter-overrides GitHubRepoUrl=https://github.com/your-username/falcon-mcp \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
 ```
 
+**Note**: The template defaults to the official CrowdStrike repository. You can override this to use your own fork if needed.
+
 ## What It Does
 
-The template creates a complete CI/CD pipeline:
+The template creates a simple and efficient CI/CD pipeline:
 
 1. **ECR Repository**: Automatically created with lifecycle policies (keeps last 10 images)
 2. **CodeBuild Project**: Configured for GitHub with webhook triggers on push to main branch
-3. **Automated Build Process**:
-   - Runs Python tests (ruff, mypy, black, pytest)
-   - Builds Python package with uv
-   - Builds Docker image using embedded multi-stage Dockerfile
+3. **Simplified Build Process**:
+   - Uses the existing production-ready Dockerfile from CrowdStrike's repository
+   - Builds Docker image directly from source
    - Pushes to ECR with dual tagging (latest + commit hash)
    - Generates deployment artifacts
 
-### Dockerfile Features
-- **Multi-stage build** with uv for fast Python dependency management
-- **Security hardened** (non-root user, minimal Alpine base)
-- **Optimized caching** with bytecode compilation
-- **Production ready** container image
+### Benefits of This Approach
+- **Simple & Reliable**: Uses the official Dockerfile maintained by CrowdStrike
+- **Always Up-to-Date**: Benefits from improvements made to the upstream repository
+- **Fast Builds**: Minimal build steps focus only on containerization
+- **Production Ready**: Uses the same build process as the official images
 
 ### Manual Build Trigger
 ```bash
@@ -73,31 +73,26 @@ The CloudFormation template creates:
 
 ## Build Process
 
-Complete automated pipeline that runs on every GitHub push to main:
+Streamlined automated pipeline that runs on every GitHub push to main:
 
-1. **Install Phase**: Sets up Python 3.13 and installs uv package manager
-2. **Pre-build Phase**: Locks dependencies and prepares virtual environment
-3. **Build Phase**:
-   - Linting with ruff
-   - Type checking with mypy
-   - Code formatting check with black
-   - Unit tests with pytest
-4. **Post-build Phase**:
-   - Creates Python distribution packages
-   - Builds Docker image using embedded multi-stage Dockerfile
-   - Pushes to ECR with dual tagging (latest + commit hash)
-   - Generates `imagedefinitions.json` for deployments
+1. **Pre-build Phase**: 
+   - Login to Amazon ECR
+   - Set up image tagging with commit hash
+2. **Build Phase**:
+   - Build Docker image using the existing Dockerfile from CrowdStrike repository
+   - Tag images for ECR (both latest and commit-specific tags)
+3. **Post-build Phase**:
+   - Push images to ECR
+   - Generate `imagedefinitions.json` for deployments
 
 ## Environment Variables
 
-The build environment is configured with:
-- `UV_COMPILE_BYTECODE=1` - Enables Python bytecode compilation
-- `UV_LINK_MODE=copy` - Copies dependencies instead of linking (required for CodeBuild)
+The build environment includes standard CodeBuild variables:
+- `AWS_DEFAULT_REGION` - Current AWS region
+- `AWS_ACCOUNT_ID` - Current AWS account ID
+- `IMAGE_REPO_NAME` - ECR repository name
+- `IMAGE_TAG` - Docker image tag (default: latest)
 
 ## Caching
 
-The buildspec includes caching for:
-- uv cache directory (`$HOME/.cache/uv/**/*`)
-- uv binary installations (`$HOME/.local/bin/**/*`)
-
-This ensures faster subsequent builds by reusing downloaded packages and tools.
+Docker layer caching is enabled to speed up subsequent builds by reusing unchanged layers.
