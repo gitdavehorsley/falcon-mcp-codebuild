@@ -125,13 +125,6 @@ Resources:
           cache:
             paths:
               - '/var/lib/docker/**/*'
-      Triggers:
-        Webhook: true
-        FilterGroups:
-          - - Type: EVENT
-              Pattern: PUSH
-            - Type: HEAD_REF
-              Pattern: "^refs/heads/main$"
 
   # IAM Role for CodeBuild
   CodeBuildServiceRole:
