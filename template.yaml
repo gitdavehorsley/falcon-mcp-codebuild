@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CloudFormation template for Falcon MCP CodeBuild with GitHub webhook integration'
+Description: 'CloudFormation template for Falcon MCP CodeBuild with flexible source options'
 
 Parameters:
   Environment:
@@ -16,9 +16,40 @@ Parameters:
     Default: falcon-mcp
     Description: Name of the CodeBuild project
 
+  RepositoryUrl:
+    Type: String
+    Default: ""
+    Description: Git repository URL (leave empty to use S3 source)
+
+  SourceType:
+    Type: String
+    Default: S3
+    AllowedValues:
+      - CODECOMMIT
+      - S3
+      - GITHUB
+    Description: Source type for the CodeBuild project
+
+  S3Bucket:
+    Type: String
+    Default: ""
+    Description: S3 bucket name for source code (required when SourceType is S3)
+
+  S3Key:
+    Type: String
+    Default: source.zip
+    Description: S3 object key for source code (used when SourceType is S3)
+
   GitHubTokenSecretArn:
     Type: String
-    Description: ARN of the AWS Secrets Manager secret containing the GitHub personal access token
+    Default: ""
+    Description: ARN of the AWS Secrets Manager secret containing the GitHub personal access token (required when SourceType is GITHUB)
+
+Conditions:
+  UseGitHub: !Equals [ !Ref SourceType, GITHUB ]
+  UseCodeCommit: !Equals [ !Ref SourceType, CODECOMMIT ]
+  UseS3: !Equals [ !Ref SourceType, S3 ]
+  HasWebhooks: !Or [ !Condition UseGitHub, !Condition UseCodeCommit ]
 
 Resources:
   # CodeBuild Project
@@ -41,21 +72,32 @@ Resources:
             Value: "1"
           - Name: UV_LINK_MODE
             Value: copy
-      Source:
-        Type: GITHUB
-        Location: https://github.com/CrowdStrike/falcon-mcp.git
-        GitCloneDepth: 1
-        BuildSpec: buildspec.yml
-        Auth:
-          Type: OAUTH
-          Resource: !Ref GitHubTokenSecretArn
-      Triggers:
-        Webhook: true
-        FilterGroups:
-          - - Type: EVENT
-              Pattern: PUSH
-            - Type: HEAD_REF
-              Pattern: "^refs/heads/main$"
+      Source: !If
+        - UseGitHub
+        - Type: GITHUB
+          Location: !Ref RepositoryUrl
+          GitCloneDepth: 1
+          BuildSpec: buildspec.yml
+          Auth:
+            Type: OAUTH
+            Resource: !Ref GitHubTokenSecretArn
+        - !If
+          - UseCodeCommit
+          - Type: CODECOMMIT
+            Location: !Ref RepositoryUrl
+            BuildSpec: buildspec.yml
+          - Type: S3
+            Location: !Sub "s3://${S3Bucket}/${S3Key}"
+            BuildSpec: buildspec.yml
+      Triggers: !If
+        - HasWebhooks
+        - Webhook: true
+          FilterGroups:
+            - - Type: EVENT
+                Pattern: PUSH
+              - Type: HEAD_REF
+                Pattern: "^refs/heads/main$"
+        - !Ref "AWS::NoValue"
 
   # IAM Role for CodeBuild
   CodeBuildServiceRole:
@@ -89,10 +131,13 @@ Resources:
                   - s3:GetBucketAcl
                   - s3:GetBucketLocation
                 Resource: '*'
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref GitHubTokenSecretArn
+              - !If
+                - UseGitHub
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref GitHubTokenSecretArn
+                - !Ref "AWS::NoValue"
 
   # CloudWatch Log Group
   CodeBuildLogGroup:

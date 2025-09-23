@@ -1,6 +1,6 @@
 # Falcon MCP CodeBuild
 
-This repository contains AWS CloudFormation templates and build specifications for deploying a CodeBuild project for the CrowdStrike Falcon MCP Server.
+This repository contains AWS CloudFormation templates and build specifications for deploying a CodeBuild project for the CrowdStrike Falcon MCP Server with flexible source control options.
 
 ## Files
 
@@ -15,14 +15,45 @@ This repository contains AWS CloudFormation templates and build specifications f
 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
 - `ProjectName` (String): Name of the CodeBuild project. Default: falcon-mcp
-- `GitHubTokenSecretArn` (String): ARN of the AWS Secrets Manager secret containing the GitHub personal access token (required for webhooks)
+- `SourceType` (String): Source type for the CodeBuild project (CODECOMMIT, S3, GITHUB). Default: S3
+- `RepositoryUrl` (String): Git repository URL (leave empty to use S3 source). Default: ""
+- `S3Bucket` (String): S3 bucket name for source code (required when SourceType is S3). Default: ""
+- `S3Key` (String): S3 object key for source code (used when SourceType is S3). Default: source.zip
+- `GitHubTokenSecretArn` (String): ARN of the AWS Secrets Manager secret containing the GitHub personal access token (required when SourceType is GITHUB). Default: ""
+
+## Source Control Options
+
+This template supports three source control options:
+
+### Option 1: AWS CodeCommit (Recommended - No External Dependencies)
+- Fully AWS-managed Git repository
+- No external tokens required
+- Automatic webhook support
+
+### Option 2: Amazon S3
+- Upload source code as ZIP files to S3
+- Manual build triggering only (no webhooks)
+- No external dependencies
+
+### Option 3: GitHub
+- Requires GitHub personal access token
+- Supports automatic webhooks on push
+- External dependency on GitHub
 
 ## Prerequisites
 
-### GitHub Access Token Setup
+### For AWS CodeCommit:
+1. Create a CodeCommit repository:
+   ```bash
+   aws codecommit create-repository --repository-name falcon-mcp
+   ```
 
-Before deploying, you need to create a GitHub personal access token and store it in AWS Secrets Manager:
+2. Get the repository URL:
+   ```bash
+   aws codecommit get-repository --repository-name falcon-mcp --query 'repositoryMetadata.cloneUrlHttp'
+   ```
 
+### For GitHub (if using GitHub source):
 1. **Create a GitHub Personal Access Token:**
    - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
    - Create a new token with `repo` scope (full control of private repositories)
@@ -36,17 +67,22 @@ Before deploying, you need to create a GitHub personal access token and store it
      --secret-string '{"token":"YOUR_GITHUB_TOKEN_HERE"}'
    ```
 
-   **Note:** The secret must be a JSON object with a `token` key containing your GitHub personal access token.
-
 3. **Get the secret ARN:**
    ```bash
    aws secretsmanager describe-secret --secret-id "falcon-mcp/github-token" --query 'ARN'
    ```
 
-## Deployment
+### For S3 (if using S3 source):
+1. Create an S3 bucket:
+   ```bash
+   aws s3 mb s3://your-falcon-mcp-builds-bucket
+   ```
 
-To deploy this CloudFormation stack:
+2. Upload your source code as a ZIP file to the bucket
 
+## Deployment Examples
+
+### Deploy with AWS CodeCommit (Recommended):
 ```bash
 aws cloudformation deploy \
   --template-file template.yaml \
@@ -54,6 +90,35 @@ aws cloudformation deploy \
   --parameter-overrides \
     Environment=dev \
     ProjectName=falcon-mcp \
+    SourceType=CODECOMMIT \
+    RepositoryUrl=https://git-codecommit.region.amazonaws.com/v1/repos/falcon-mcp \
+  --capabilities CAPABILITY_IAM
+```
+
+### Deploy with S3 Source:
+```bash
+aws cloudformation deploy \
+  --template-file template.yaml \
+  --stack-name falcon-mcp-codebuild-dev \
+  --parameter-overrides \
+    Environment=dev \
+    ProjectName=falcon-mcp \
+    SourceType=S3 \
+    S3Bucket=your-falcon-mcp-builds-bucket \
+    S3Key=source.zip \
+  --capabilities CAPABILITY_IAM
+```
+
+### Deploy with GitHub:
+```bash
+aws cloudformation deploy \
+  --template-file template.yaml \
+  --stack-name falcon-mcp-codebuild-dev \
+  --parameter-overrides \
+    Environment=dev \
+    ProjectName=falcon-mcp \
+    SourceType=GITHUB \
+    RepositoryUrl=https://github.com/CrowdStrike/falcon-mcp.git \
     GitHubTokenSecretArn=arn:aws:secretsmanager:region:account:secret:falcon-mcp/github-token \
   --capabilities CAPABILITY_IAM
 ```
@@ -61,9 +126,10 @@ aws cloudformation deploy \
 ## Architecture
 
 The CloudFormation template creates:
-1. A CodeBuild project that triggers on pushes to the main branch of the [CrowdStrike/falcon-mcp](https://github.com/CrowdStrike/falcon-mcp) repository
-2. An IAM service role with permissions for CloudWatch logs and S3 access
-3. A CloudWatch log group for storing build logs
+1. A CodeBuild project with configurable source (AWS CodeCommit, S3, or GitHub)
+2. Automatic webhooks for Git-based sources (CodeCommit/GitHub) that trigger on main branch pushes
+3. An IAM service role with appropriate permissions based on source type
+4. A CloudWatch log group for storing build logs
 
 ## Build Process
 
