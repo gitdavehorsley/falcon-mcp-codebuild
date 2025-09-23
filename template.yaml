@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Basic CloudFormation template for Falcon MCP CodeBuild'
+Description: 'CloudFormation template for Falcon MCP CodeBuild with GitHub webhook integration'
 
 Parameters:
   Environment:
@@ -15,6 +15,10 @@ Parameters:
     Type: String
     Default: falcon-mcp
     Description: Name of the CodeBuild project
+
+  GitHubTokenSecretArn:
+    Type: String
+    Description: ARN of the AWS Secrets Manager secret containing the GitHub personal access token
 
 Resources:
   # CodeBuild Project
@@ -42,6 +46,9 @@ Resources:
         Location: https://github.com/CrowdStrike/falcon-mcp.git
         GitCloneDepth: 1
         BuildSpec: buildspec.yml
+        Auth:
+          Type: OAUTH
+          Resource: !Ref GitHubTokenSecretArn
       Triggers:
         Webhook: true
         FilterGroups:
@@ -82,6 +89,10 @@ Resources:
                   - s3:GetBucketAcl
                   - s3:GetBucketLocation
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref GitHubTokenSecretArn
 
   # CloudWatch Log Group
   CodeBuildLogGroup:

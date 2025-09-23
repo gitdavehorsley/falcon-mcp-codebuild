@@ -15,6 +15,33 @@ This repository contains AWS CloudFormation templates and build specifications f
 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
 - `ProjectName` (String): Name of the CodeBuild project. Default: falcon-mcp
+- `GitHubTokenSecretArn` (String): ARN of the AWS Secrets Manager secret containing the GitHub personal access token (required for webhooks)
+
+## Prerequisites
+
+### GitHub Access Token Setup
+
+Before deploying, you need to create a GitHub personal access token and store it in AWS Secrets Manager:
+
+1. **Create a GitHub Personal Access Token:**
+   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Create a new token with `repo` scope (full control of private repositories)
+   - Copy the token
+
+2. **Store the token in AWS Secrets Manager:**
+   ```bash
+   aws secretsmanager create-secret \
+     --name "falcon-mcp/github-token" \
+     --description "GitHub personal access token for CodeBuild webhooks" \
+     --secret-string '{"token":"YOUR_GITHUB_TOKEN_HERE"}'
+   ```
+
+   **Note:** The secret must be a JSON object with a `token` key containing your GitHub personal access token.
+
+3. **Get the secret ARN:**
+   ```bash
+   aws secretsmanager describe-secret --secret-id "falcon-mcp/github-token" --query 'ARN'
+   ```
 
 ## Deployment
 
@@ -24,7 +51,10 @@ To deploy this CloudFormation stack:
 aws cloudformation deploy \
   --template-file template.yaml \
   --stack-name falcon-mcp-codebuild-dev \
-  --parameter-overrides Environment=dev ProjectName=falcon-mcp \
+  --parameter-overrides \
+    Environment=dev \
+    ProjectName=falcon-mcp \
+    GitHubTokenSecretArn=arn:aws:secretsmanager:region:account:secret:falcon-mcp/github-token \
   --capabilities CAPABILITY_IAM
 ```
 
