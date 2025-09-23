@@ -21,11 +21,6 @@ Parameters:
     Default: latest
     Description: Docker image tag to use for the built image
 
-  GitHubRepoUrl:
-    Type: String
-    Default: https://github.com/CrowdStrike/falcon-mcp
-    Description: GitHub repository URL for the CrowdStrike Falcon MCP source
-
 Resources:
   # ================================
   # ECR Repository
@@ -93,7 +88,7 @@ Resources:
             Value: "true"
       Source:
         Type: GITHUB
-        Location: !Ref GitHubRepoUrl
+        Location: https://github.com/CrowdStrike/falcon-mcp
         GitCloneDepth: 1
         BuildSpec: |
           version: 0.2

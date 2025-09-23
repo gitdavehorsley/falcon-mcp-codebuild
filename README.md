@@ -15,7 +15,6 @@ This repository contains AWS CloudFormation templates for deploying a CodeBuild 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
 - `ProjectName` (String): Name of the CodeBuild project and ECR repository. Default: falcon-mcp
 - `ImageTag` (String): Docker image tag to use for the built image. Default: latest
-- `GitHubRepoUrl` (String): GitHub repository URL. Default: https://github.com/CrowdStrike/falcon-mcp
 
 ## Quick Deploy
 
@@ -26,7 +25,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
 ```
 
-**Note**: The template defaults to the official CrowdStrike repository. You can override this to use your own fork if needed.
+**Note**: The template is hardcoded to build from the official CrowdStrike Falcon MCP repository at `https://github.com/CrowdStrike/falcon-mcp`.
 
 ## What It Does
 
