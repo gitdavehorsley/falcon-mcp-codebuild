@@ -1,0 +1,47 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.13
+    commands:
+      - echo "Installing uv and dependencies..."
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv --version
+
+  pre_build:
+    commands:
+      - echo "Setting up Python environment..."
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv lock --check
+      - uv sync --frozen --no-install-project --no-dev --no-editable
+
+  build:
+    commands:
+      - echo "Running linting and type checking..."
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv run ruff check .
+      - uv run mypy .
+      - uv run black --check .
+      - echo "Running tests..."
+      - uv run pytest
+
+  post_build:
+    commands:
+      - echo "Build completed successfully"
+      - echo "Creating distribution package..."
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv build
+
+artifacts:
+  files:
+    - 'dist/**/*'
+    - 'pyproject.toml'
+    - 'uv.lock'
+  discard-paths: no
+
+cache:
+  paths:
+    - '$HOME/.cache/uv/**/*'
+    - '$HOME/.local/bin/**/*'
