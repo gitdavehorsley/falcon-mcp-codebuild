@@ -14,12 +14,7 @@ Parameters:
   ProjectName:
     Type: String
     Default: falcon-mcp
-    Description: Name of the CodeBuild project and ECR repository
-
-  CodeCommitRepositoryName:
-    Type: String
-    Default: falcon-mcp
-    Description: Name of the existing CodeCommit repository
+    Description: Name of the CodeBuild project, ECR repository, and CodeCommit repository
 
   ImageTag:
     Type: String
@@ -93,7 +88,7 @@ Resources:
             Value: "true"
       Source:
         Type: CODECOMMIT
-        Location: !Sub "https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${CodeCommitRepositoryName}"
+        Location: !Sub "https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${ProjectName}"
         GitCloneDepth: 1
         BuildSpec: |
           version: 0.2
@@ -242,7 +237,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - codecommit:GitPull
-                Resource: !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}"
+                Resource: !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${ProjectName}"
               - Effect: Allow
                 Action:
                   - ecr:BatchCheckLayerAvailability

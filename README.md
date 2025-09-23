@@ -13,13 +13,12 @@ This repository contains AWS CloudFormation templates and build specifications f
 ## Parameters
 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
-- `ProjectName` (String): Name of the CodeBuild project and ECR repository. Default: falcon-mcp
-- `CodeCommitRepositoryName` (String): Name of the existing CodeCommit repository. Default: falcon-mcp
+- `ProjectName` (String): Name of the CodeBuild project, ECR repository, and CodeCommit repository. Default: falcon-mcp
 - `ImageTag` (String): Docker image tag to use for the built image. Default: latest
 
 ## Prerequisites
 
-**Create a CodeCommit repository:**
+**Create a CodeCommit repository (name must match ProjectName parameter):**
 ```bash
 aws codecommit create-repository --repository-name falcon-mcp
 ```
