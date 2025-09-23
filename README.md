@@ -82,6 +82,7 @@ The CloudFormation template creates:
 Streamlined build pipeline that runs when manually triggered:
 
 1. **Pre-build Phase**: 
+   - Enable Docker BuildKit for advanced Dockerfile features
    - Login to Amazon ECR
    - Set up image tagging with commit hash
 2. **Build Phase**:

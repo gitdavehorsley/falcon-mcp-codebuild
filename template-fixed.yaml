@@ -92,6 +92,9 @@ Resources:
           phases:
             pre_build:
               commands:
+                - echo "Enabling Docker BuildKit..."
+                - export DOCKER_BUILDKIT=1
+                - export BUILDKIT_PROGRESS=plain
                 - echo "Logging in to Amazon ECR..."
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
                 - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
