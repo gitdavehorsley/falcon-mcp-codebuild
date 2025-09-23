@@ -94,6 +94,9 @@ Parameters:
     Default: '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
     Description: 'Comma-delimited list of CIDR blocks allowed to access the Falcon MCP service'
 
+Conditions:
+  IsNotStdioTransport: !Not [!Equals [!Ref FalconMCPTransport, "stdio"]]
+
 Resources:
   # ================================
   # ECS Task Execution Role
@@ -251,17 +254,26 @@ Resources:
         - Name: !Sub "${ProjectName}-container"
           Image: !Sub "${ECRRepositoryURI}:${ImageTag}"
           Essential: true
-          PortMappings:
-            - ContainerPort: !Ref ContainerPort
-              Protocol: tcp
+          PortMappings: !If
+            - IsNotStdioTransport
+            - - ContainerPort: !Ref ContainerPort
+                Protocol: tcp
+            - !Ref "AWS::NoValue"
+          EntryPoint:
+            - "python"
+            - "-m"
+            - "falcon_mcp.server"
           Command:
-            - "falcon-mcp"
             - "--transport"
             - !Ref FalconMCPTransport
-            - "--host"
-            - "0.0.0.0"
-            - "--port"
-            - !Ref ContainerPort
+            - !If 
+              - IsNotStdioTransport
+              - !Sub "--host=0.0.0.0"
+              - !Ref "AWS::NoValue"
+            - !If
+              - IsNotStdioTransport
+              - !Sub "--port=${ContainerPort}"
+              - !Ref "AWS::NoValue"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -278,14 +290,16 @@ Resources:
             - Name: FALCON_MCP_MODULES
               Value: !Ref FalconMCPModules
           # Health check configuration
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - !Sub "python -c \"import requests; requests.get('http://localhost:${ContainerPort}/', timeout=5)\" || exit 1"
-            Interval: 30
-            Timeout: 10
-            Retries: 3
-            StartPeriod: 60
+          HealthCheck: !If
+            - IsNotStdioTransport
+            - Command:
+                - CMD-SHELL
+                - !Sub "curl -f http://localhost:${ContainerPort}/health || exit 1"
+              Interval: 30
+              Timeout: 10
+              Retries: 3
+              StartPeriod: 60
+            - !Ref "AWS::NoValue"
           # Resource requirements
           Memory: !Ref TaskMemory
           MemoryReservation: !Ref TaskMemory
