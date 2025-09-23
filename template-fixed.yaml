@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CloudFormation template for Falcon MCP CodeBuild with flexible source options'
+Description: 'CloudFormation template for Falcon MCP CodeBuild with flexible source options and embedded BuildSpec/Dockerfile'
 
 Parameters:
   Environment:
