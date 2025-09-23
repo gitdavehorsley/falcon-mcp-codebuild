@@ -14,135 +14,17 @@ Parameters:
   ProjectName:
     Type: String
     Default: falcon-mcp
-    Description: Name of the CodeBuild project
+    Description: Name of the CodeBuild project and ECR repository
 
-  RepositoryUrl:
+  CodeCommitRepositoryName:
     Type: String
-    Description: CodeCommit repository URL (required)
+    Default: falcon-mcp
+    Description: Name of the existing CodeCommit repository
 
   ImageTag:
     Type: String
     Default: latest
     Description: Docker image tag to use for the built image
-
-  DockerfileContent:
-    Type: String
-    Default: |
-      # Use a Python image with uv pre-installed
-      # ghcr.io/astral-sh/uv:python3.13-alpine (multi-arch: amd64, arm64)
-      FROM ghcr.io/astral-sh/uv@sha256:3ce89663b5309e77087de25ca805c49988f2716cdb2c6469b1dec2764f58b141 AS uv
-
-      # Install the project into `/app`
-      WORKDIR /app
-
-      # Enable bytecode compilation
-      ENV UV_COMPILE_BYTECODE=1
-
-      # Copy from the cache instead of linking since it's a mounted volume
-      ENV UV_LINK_MODE=copy
-
-      # Generate proper TOML lockfile first
-      RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-          uv lock
-
-      # Install the project's dependencies using the lockfile
-      RUN --mount=type=cache,target=/root/.cache/uv \
-          --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-          --mount=type=bind,source=uv.lock,target=uv.lock \
-          uv sync --frozen --no-install-project --no-dev --no-editable
-
-      # Then, add the rest of the project source code and install it
-      ADD . /app
-      RUN --mount=type=cache,target=/root/.cache/uv \
-          --mount=type=bind,source=uv.lock,target=uv.lock \
-          uv sync --frozen --no-dev --no-editable
-
-      # Remove unnecessary files from the virtual environment before copying
-      RUN find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + && \
-          find /app/.venv -name '*.pyc' -delete && \
-          find /app/.venv -name '*.pyo' -delete && \
-          echo "Cleaned up .venv"
-
-      # Final stage
-      # python:3.13-alpine (multi-arch: amd64, arm64)
-      FROM python@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
-
-      # Create a non-root user 'app'
-      RUN adduser -D -h /home/app -s /bin/sh app
-      WORKDIR /app
-      USER app
-
-      COPY --from=uv --chown=app:app /app/.venv /app/.venv
-
-      # Place executables in the environment at the front of the path
-      ENV PATH="/app/.venv/bin:$PATH"
-
-      ENTRYPOINT ["falcon-mcp"]
-    Description: Inline Dockerfile content for container builds
-
-  BuildSpecContent:
-    Type: String
-    Default: |
-      version: 0.2
-
-      phases:
-        install:
-          runtime-versions:
-            python: 3.13
-          commands:
-            - echo "Installing uv and dependencies..."
-            - curl -LsSf https://astral.sh/uv/install.sh | sh
-            - export PATH="$HOME/.local/bin:$PATH"
-            - uv --version
-
-        pre_build:
-          commands:
-            - echo "Setting up Python environment..."
-            - export PATH="$HOME/.local/bin:$PATH"
-            - uv lock --check
-            - uv sync --frozen --no-install-project --no-dev --no-editable
-
-        build:
-          commands:
-            - echo "Running linting and type checking..."
-            - export PATH="$HOME/.local/bin:$PATH"
-            - uv run ruff check .
-            - uv run mypy .
-            - uv run black --check .
-            - echo "Running tests..."
-            - uv run pytest
-
-        post_build:
-          commands:
-            - echo "Build completed successfully"
-            - echo "Building and pushing Docker image to ECR..."
-            - export PATH="$HOME/.local/bin:$PATH"
-            - uv build
-            - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-            - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
-            - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
-            - IMAGE_TAG_COMMIT=${COMMIT_HASH:=latest}
-            - printf '%s' "$DOCKERFILE_CONTENT" > Dockerfile
-            - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
-            - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
-            - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG_COMMIT
-            - docker push $REPOSITORY_URI:$IMAGE_TAG
-            - docker push $REPOSITORY_URI:$IMAGE_TAG_COMMIT
-            - printf '[{"name":"falcon-mcp","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
-
-      artifacts:
-        files:
-          - 'dist/**/*'
-          - 'pyproject.toml'
-          - 'uv.lock'
-          - 'imagedefinitions.json'
-        discard-paths: no
-
-      cache:
-        paths:
-          - '$HOME/.cache/uv/**/*'
-          - '$HOME/.local/bin/**/*'
-    Description: Inline BuildSpec content for CodeBuild
 
 Resources:
   # ================================
@@ -209,13 +91,121 @@ Resources:
             Value: !Ref ImageTag
           - Name: CREATE_ECR
             Value: "true"
-          - Name: DOCKERFILE_CONTENT
-            Value: !Ref DockerfileContent
       Source:
         Type: CODECOMMIT
-        Location: !Ref RepositoryUrl
+        Location: !Sub "https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${CodeCommitRepositoryName}"
         GitCloneDepth: 1
-        BuildSpec: !Ref BuildSpecContent
+        BuildSpec: |
+          version: 0.2
+
+          phases:
+            install:
+              runtime-versions:
+                python: 3.13
+              commands:
+                - echo "Installing uv and dependencies..."
+                - curl -LsSf https://astral.sh/uv/install.sh | sh
+                - export PATH="$HOME/.local/bin:$PATH"
+                - uv --version
+
+            pre_build:
+              commands:
+                - echo "Setting up Python environment..."
+                - export PATH="$HOME/.local/bin:$PATH"
+                - uv lock --check
+                - uv sync --frozen --no-install-project --no-dev --no-editable
+
+            build:
+              commands:
+                - echo "Running linting and type checking..."
+                - export PATH="$HOME/.local/bin:$PATH"
+                - uv run ruff check .
+                - uv run mypy .
+                - uv run black --check .
+                - echo "Running tests..."
+                - uv run pytest
+
+            post_build:
+              commands:
+                - echo "Build completed successfully"
+                - echo "Building and pushing Docker image to ECR..."
+                - export PATH="$HOME/.local/bin:$PATH"
+                - uv build
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+                - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+                - IMAGE_TAG_COMMIT=${COMMIT_HASH:=latest}
+                - cat > Dockerfile << 'EOF'
+                  # Use a Python image with uv pre-installed
+                  # ghcr.io/astral-sh/uv:python3.13-alpine (multi-arch: amd64, arm64)
+                  FROM ghcr.io/astral-sh/uv@sha256:3ce89663b5309e77087de25ca805c49988f2716cdb2c6469b1dec2764f58b141 AS uv
+
+                  # Install the project into `/app`
+                  WORKDIR /app
+
+                  # Enable bytecode compilation
+                  ENV UV_COMPILE_BYTECODE=1
+
+                  # Copy from the cache instead of linking since it's a mounted volume
+                  ENV UV_LINK_MODE=copy
+
+                  # Generate proper TOML lockfile first
+                  RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+                      uv lock
+
+                  # Install the project's dependencies using the lockfile
+                  RUN --mount=type=cache,target=/root/.cache/uv \
+                      --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+                      --mount=type=bind,source=uv.lock,target=uv.lock \
+                      uv sync --frozen --no-install-project --no-dev --no-editable
+
+                  # Then, add the rest of the project source code and install it
+                  ADD . /app
+                  RUN --mount=type=cache,target=/root/.cache/uv \
+                      --mount=type=bind,source=uv.lock,target=uv.lock \
+                      uv sync --frozen --no-dev --no-editable
+
+                  # Remove unnecessary files from the virtual environment before copying
+                  RUN find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + && \
+                      find /app/.venv -name '*.pyc' -delete && \
+                      find /app/.venv -name '*.pyo' -delete && \
+                      echo "Cleaned up .venv"
+
+                  # Final stage
+                  # python:3.13-alpine (multi-arch: amd64, arm64)
+                  FROM python@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
+
+                  # Create a non-root user 'app'
+                  RUN adduser -D -h /home/app -s /bin/sh app
+                  WORKDIR /app
+                  USER app
+
+                  COPY --from=uv --chown=app:app /app/.venv /app/.venv
+
+                  # Place executables in the environment at the front of the path
+                  ENV PATH="/app/.venv/bin:$PATH"
+
+                  ENTRYPOINT ["falcon-mcp"]
+                  EOF
+                - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+                - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
+                - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG_COMMIT
+                - docker push $REPOSITORY_URI:$IMAGE_TAG
+                - docker push $REPOSITORY_URI:$IMAGE_TAG_COMMIT
+                - printf '[{"name":"falcon-mcp","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+
+          artifacts:
+            files:
+              - 'dist/**/*'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'imagedefinitions.json'
+            discard-paths: no
+
+          cache:
+            paths:
+              - '$HOME/.cache/uv/**/*'
+              - '$HOME/.local/bin/**/*'
       Triggers:
         Webhook: true
         FilterGroups:
@@ -252,7 +242,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - codecommit:GitPull
-                Resource: !Ref RepositoryUrl
+                Resource: !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}"
               - Effect: Allow
                 Action:
                   - ecr:BatchCheckLayerAvailability

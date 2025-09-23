@@ -13,23 +13,16 @@ This repository contains AWS CloudFormation templates and build specifications f
 ## Parameters
 
 - `Environment` (String): Environment name (dev, staging, prod). Default: dev
-- `ProjectName` (String): Name of the CodeBuild project. Default: falcon-mcp
-- `RepositoryUrl` (String): **Required** - CodeCommit repository URL
+- `ProjectName` (String): Name of the CodeBuild project and ECR repository. Default: falcon-mcp
+- `CodeCommitRepositoryName` (String): Name of the existing CodeCommit repository. Default: falcon-mcp
 - `ImageTag` (String): Docker image tag to use for the built image. Default: latest
-- `DockerfileContent` (String): Inline Dockerfile content for container builds (auto-populated)
-- `BuildSpecContent` (String): Inline BuildSpec content for CodeBuild (auto-populated)
 
 ## Prerequisites
 
-1. **Create a CodeCommit repository:**
-   ```bash
-   aws codecommit create-repository --repository-name falcon-mcp
-   ```
-
-2. **Get the repository URL:**
-   ```bash
-   aws codecommit get-repository --repository-name falcon-mcp --query 'repositoryMetadata.cloneUrlHttp'
-   ```
+**Create a CodeCommit repository:**
+```bash
+aws codecommit create-repository --repository-name falcon-mcp
+```
 
 ## Quick Deploy
 
@@ -37,8 +30,6 @@ This repository contains AWS CloudFormation templates and build specifications f
 aws cloudformation deploy \
   --template-file template-fixed.yaml \
   --stack-name falcon-mcp-codebuild-dev \
-  --parameter-overrides \
-    RepositoryUrl=https://git-codecommit.region.amazonaws.com/v1/repos/falcon-mcp \
   --capabilities CAPABILITY_IAM
 ```
 
