@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CloudFormation template for Falcon MCP CodeBuild with flexible source options and embedded BuildSpec/Dockerfile'
+Description: 'Falcon MCP CodeBuild with CodeCommit and ECR'
 
 Parameters:
   Environment:
@@ -18,48 +18,7 @@ Parameters:
 
   RepositoryUrl:
     Type: String
-    Default: ""
-    Description: Git repository URL (leave empty to use S3 source)
-
-  SourceType:
-    Type: String
-    Default: S3
-    AllowedValues:
-      - CODECOMMIT
-      - S3
-      - GITHUB
-    Description: Source type for the CodeBuild project
-
-  S3Bucket:
-    Type: String
-    Default: ""
-    Description: S3 bucket name for source code (required when SourceType is S3)
-
-  S3Key:
-    Type: String
-    Default: source.zip
-    Description: S3 object key for source code (used when SourceType is S3)
-
-  GitHubTokenSecretArn:
-    Type: String
-    Default: ""
-    Description: ARN of the AWS Secrets Manager secret containing the GitHub personal access token (required when SourceType is GITHUB)
-
-  # ================================
-  # ECR Configuration
-  # ================================
-  CreateECRRepository:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Whether to create an ECR repository for Docker images
-
-  ECRRepositoryName:
-    Type: String
-    Default: ""
-    Description: Name of the ECR repository (defaults to ProjectName if empty)
+    Description: CodeCommit repository URL (required)
 
   ImageTag:
     Type: String
@@ -156,27 +115,20 @@ Parameters:
         post_build:
           commands:
             - echo "Build completed successfully"
-            - |
-              if [ "$CREATE_ECR" = "true" ]; then
-                echo "Building and pushing Docker image to ECR..."
-                export PATH="$HOME/.local/bin:$PATH"
-                uv build
-                aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-                REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
-                COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
-                IMAGE_TAG_COMMIT=${COMMIT_HASH:=latest}
-                printf '%s' "$DOCKERFILE_CONTENT" > Dockerfile
-                docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
-                docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
-                docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG_COMMIT
-                docker push $REPOSITORY_URI:$IMAGE_TAG
-                docker push $REPOSITORY_URI:$IMAGE_TAG_COMMIT
-                printf '[{"name":"falcon-mcp","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
-              else
-                echo "Creating distribution package..."
-                export PATH="$HOME/.local/bin:$PATH"
-                uv build
-              fi
+            - echo "Building and pushing Docker image to ECR..."
+            - export PATH="$HOME/.local/bin:$PATH"
+            - uv build
+            - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+            - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+            - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+            - IMAGE_TAG_COMMIT=${COMMIT_HASH:=latest}
+            - printf '%s' "$DOCKERFILE_CONTENT" > Dockerfile
+            - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+            - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
+            - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG_COMMIT
+            - docker push $REPOSITORY_URI:$IMAGE_TAG
+            - docker push $REPOSITORY_URI:$IMAGE_TAG_COMMIT
+            - printf '[{"name":"falcon-mcp","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
 
       artifacts:
         files:
@@ -192,22 +144,14 @@ Parameters:
           - '$HOME/.local/bin/**/*'
     Description: Inline BuildSpec content for CodeBuild
 
-Conditions:
-  UseGitHub: !Equals [ !Ref SourceType, GITHUB ]
-  UseCodeCommit: !Equals [ !Ref SourceType, CODECOMMIT ]
-  UseS3: !Equals [ !Ref SourceType, S3 ]
-  HasWebhooks: !Or [ !Condition UseGitHub, !Condition UseCodeCommit ]
-  CreateECR: !Equals [ !Ref CreateECRRepository, "true" ]
-
 Resources:
   # ================================
-  # ECR Repository (Conditional)
+  # ECR Repository
   # ================================
   ECRRepository:
     Type: AWS::ECR::Repository
-    Condition: CreateECR
     Properties:
-      RepositoryName: !If [ !Equals [ !Ref ECRRepositoryName, "" ], !Ref ProjectName, !Ref ECRRepositoryName ]
+      RepositoryName: !Ref ProjectName
       ImageTagMutability: MUTABLE
       ImageScanningConfiguration:
         ScanOnPush: true
@@ -247,7 +191,7 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
-        PrivilegedMode: !Ref CreateECRRepository
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: ENVIRONMENT
             Value: !Ref Environment
@@ -255,59 +199,30 @@ Resources:
             Value: "1"
           - Name: UV_LINK_MODE
             Value: copy
-          - !If
-            - CreateECR
-            - Name: AWS_DEFAULT_REGION
-              Value: !Ref AWS::Region
-            - !Ref "AWS::NoValue"
-          - !If
-            - CreateECR
-            - Name: AWS_ACCOUNT_ID
-              Value: !Ref AWS::AccountId
-            - !Ref "AWS::NoValue"
-          - !If
-            - CreateECR
-            - Name: IMAGE_REPO_NAME
-              Value: !If [ !Equals [ !Ref ECRRepositoryName, "" ], !Ref ProjectName, !Ref ECRRepositoryName ]
-            - !Ref "AWS::NoValue"
-          - !If
-            - CreateECR
-            - Name: IMAGE_TAG
-              Value: !Ref ImageTag
-            - !Ref "AWS::NoValue"
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref ProjectName
+          - Name: IMAGE_TAG
+            Value: !Ref ImageTag
           - Name: CREATE_ECR
-            Value: !Ref CreateECRRepository
-          - !If
-            - CreateECR
-            - Name: DOCKERFILE_CONTENT
-              Value: !Ref DockerfileContent
-            - !Ref "AWS::NoValue"
-      Source: !If
-        - UseGitHub
-        - Type: GITHUB
-          Location: !Ref RepositoryUrl
-          GitCloneDepth: 1
-          BuildSpec: !Ref BuildSpecContent
-          Auth:
-            Type: OAUTH
-            Resource: !Ref GitHubTokenSecretArn
-        - !If
-          - UseCodeCommit
-          - Type: CODECOMMIT
-            Location: !Ref RepositoryUrl
-            BuildSpec: !Ref BuildSpecContent
-          - Type: S3
-            Location: !Sub "s3://${S3Bucket}/${S3Key}"
-            BuildSpec: !Ref BuildSpecContent
-      Triggers: !If
-        - HasWebhooks
-        - Webhook: true
-          FilterGroups:
-            - - Type: EVENT
-                Pattern: PUSH
-              - Type: HEAD_REF
-                Pattern: "^refs/heads/main$"
-        - !Ref "AWS::NoValue"
+            Value: "true"
+          - Name: DOCKERFILE_CONTENT
+            Value: !Ref DockerfileContent
+      Source:
+        Type: CODECOMMIT
+        Location: !Ref RepositoryUrl
+        GitCloneDepth: 1
+        BuildSpec: !Ref BuildSpecContent
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+              Pattern: "^refs/heads/main$"
 
   # IAM Role for CodeBuild
   CodeBuildServiceRole:
@@ -336,33 +251,19 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:GetBucketAcl
-                  - s3:GetBucketLocation
-                Resource: '*'
-              - !If
-                - UseGitHub
-                - Effect: Allow
-                  Action:
-                    - secretsmanager:GetSecretValue
-                  Resource: !Ref GitHubTokenSecretArn
-                - !Ref "AWS::NoValue"
-              - !If
-                - CreateECR
-                - Effect: Allow
-                  Action:
-                    - ecr:BatchCheckLayerAvailability
-                    - ecr:GetDownloadUrlForLayer
-                    - ecr:BatchGetImage
-                    - ecr:GetAuthorizationToken
-                    - ecr:InitiateLayerUpload
-                    - ecr:UploadLayerPart
-                    - ecr:CompleteLayerUpload
-                    - ecr:PutImage
-                  Resource:
-                    - !If [ !Equals [ !Ref ECRRepositoryName, "" ], !GetAtt ECRRepository.Arn, !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ECRRepositoryName}" ]
-                - !Ref "AWS::NoValue"
+                  - codecommit:GitPull
+                Resource: !Ref RepositoryUrl
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: !GetAtt ECRRepository.Arn
 
   # CloudWatch Log Group
   CodeBuildLogGroup:
@@ -385,21 +286,13 @@ Outputs:
       Name: !Sub "${ProjectName}-codebuild-arn-${Environment}"
 
   ECRRepositoryURI:
-    Description: ECR Repository URI (when ECR is enabled)
-    Value: !If
-      - CreateECR
-      - !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}"
-      - "ECR not created"
+    Description: ECR Repository URI
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}"
     Export:
       Name: !Sub "${ProjectName}-ecr-repo-uri-${Environment}"
-    Condition: CreateECR
 
   ECRRepositoryName:
-    Description: ECR Repository Name (when ECR is enabled)
-    Value: !If
-      - CreateECR
-      - !If [ !Equals [ !Ref ECRRepositoryName, "" ], !Ref ProjectName, !Ref ECRRepositoryName ]
-      - "ECR not created"
+    Description: ECR Repository Name
+    Value: !Ref ECRRepository
     Export:
       Name: !Sub "${ProjectName}-ecr-repo-name-${Environment}"
-    Condition: CreateECR
