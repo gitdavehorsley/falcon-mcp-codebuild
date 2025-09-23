@@ -53,8 +53,8 @@ Parameters:
   
   ContainerPort:
     Type: Number
-    Default: 3000
-    Description: 'Port that the Falcon MCP server listens on'
+    Default: 8000
+    Description: 'Port that the Falcon MCP server listens on (8000 for HTTP transports, not used for stdio)'
   
   FalconClientId:
     Type: String
@@ -70,6 +70,20 @@ Parameters:
     Type: String
     Default: 'https://api.crowdstrike.com'
     Description: 'CrowdStrike Falcon API Base URL'
+  
+  FalconMCPModules:
+    Type: String
+    Default: ''
+    Description: 'Comma-separated list of modules to enable (e.g., detections,incidents,intel,spotlight,idp). Leave empty for all modules.'
+  
+  FalconMCPTransport:
+    Type: String
+    Default: 'sse'
+    AllowedValues:
+      - 'stdio'
+      - 'sse'
+      - 'streamable-http'
+    Description: 'Transport protocol for the MCP server (sse recommended for containers)'
 
 Resources:
   # ================================
@@ -179,6 +193,14 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+          Command:
+            - "falcon-mcp"
+            - "--transport"
+            - !Ref FalconMCPTransport
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - !Ref ContainerPort
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -186,23 +208,21 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
           Environment:
-            - Name: NODE_ENV
-              Value: !Ref Environment
-            - Name: PORT
-              Value: !Ref ContainerPort
             - Name: FALCON_CLIENT_ID
               Value: !Ref FalconClientId
             - Name: FALCON_CLIENT_SECRET
               Value: !Ref FalconClientSecret
             - Name: FALCON_BASE_URL
               Value: !Ref FalconBaseUrl
+            - Name: FALCON_MCP_MODULES
+              Value: !Ref FalconMCPModules
           # Health check configuration
           HealthCheck:
             Command:
               - CMD-SHELL
-              - !Sub "curl -f http://localhost:${ContainerPort}/health || exit 1"
+              - !Sub "python -c \"import requests; requests.get('http://localhost:${ContainerPort}/', timeout=5)\" || exit 1"
             Interval: 30
-            Timeout: 5
+            Timeout: 10
             Retries: 3
             StartPeriod: 60
           # Resource requirements
