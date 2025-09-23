@@ -5,13 +5,10 @@ This repository contains AWS CloudFormation templates and build specifications f
 ## Files
 
 - `template.yaml` - Main CloudFormation template that creates:
-  - AWS CodeBuild project
+  - AWS CodeBuild project with embedded BuildSpec and Dockerfile
   - IAM role with necessary permissions
   - CloudWatch log group for build logs
-
-- `buildspec.yml` - Build specification file that defines the build phases and commands
-
-- `Dockerfile` - Multi-stage Docker build file for creating containerized Falcon MCP images
+  - Optional ECR repository for Docker images
 
 ## Parameters
 
@@ -25,6 +22,8 @@ This repository contains AWS CloudFormation templates and build specifications f
 - `CreateECRRepository` (String): Whether to create an ECR repository for Docker images ("true" or "false"). Default: "true"
 - `ECRRepositoryName` (String): Name of the ECR repository (defaults to ProjectName if empty). Default: ""
 - `ImageTag` (String): Docker image tag to use for the built image. Default: latest
+- `DockerfileContent` (String): Inline Dockerfile content for container builds. Default: Multi-stage Falcon MCP Dockerfile
+- `BuildSpecContent` (String): Inline BuildSpec content for CodeBuild. Default: Complete Python + Docker build specification
 
 ## Source Control Options
 
@@ -192,11 +191,13 @@ docker pull your-account-id.dkr.ecr.your-region.amazonaws.com/falcon-mcp:latest
 ## Architecture
 
 The CloudFormation template creates:
-1. A CodeBuild project with configurable source (AWS CodeCommit, S3, or GitHub)
-2. Automatic webhooks for Git-based sources (CodeCommit/GitHub) that trigger on main branch pushes
+1. A CodeBuild project with embedded BuildSpec and Dockerfile for complete build automation
+2. Configurable source control (AWS CodeCommit, S3, or GitHub) with automatic webhooks
 3. An optional ECR repository for Docker image storage with lifecycle policies
 4. An IAM service role with appropriate permissions based on source type and ECR requirements
 5. A CloudWatch log group for storing build logs
+
+**Everything is Self-Contained**: Unlike external BuildSpec files, this template embeds all build logic, making deployments completely independent of repository contents.
 
 ## Build Process
 
