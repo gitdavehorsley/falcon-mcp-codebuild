@@ -461,3 +461,4 @@ Outputs:
     Value: !Sub "${ProjectName}-api-key-${Environment}"
     Export:
       Name: !Sub "${ProjectName}-api-key-secret-name-${Environment}"
+

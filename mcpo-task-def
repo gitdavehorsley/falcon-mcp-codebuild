@@ -1,0 +1,50 @@
+{
+  "family": "falcon-mcp-with-mcpo",
+  "containerDefinitions": [
+    {
+      "name": "falcon-mcp-mcpo",
+      "image": "ghcr.io/open-webui/mcpo:main",
+      "command": [
+        "mcpo",
+        "--port", "8000",
+        "--host", "0.0.0.0", 
+        "--api-key", "your-chosen-secret-key",
+        "--",
+        "falcon-mcp"
+      ],
+      "environment": [
+        {
+          "name": "FALCON_CLIENT_ID",
+          "value": "your-crowdstrike-client-id"
+        },
+        {
+          "name": "FALCON_CLIENT_SECRET",
+          "value": "your-crowdstrike-client-secret"
+        },
+        {
+          "name": "FALCON_BASE_URL",
+          "value": "https://api.crowdstrike.com"
+        }
+      ],
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/falcon-mcp-mcpo",
+          "awslogs-region": "your-region",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ],
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024"
+}
