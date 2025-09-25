@@ -57,6 +57,11 @@ Parameters:
     Default: 8000
     Description: 'Port that the MCPO server listens on'
   
+  ServiceConnectPortName:
+    Type: String
+    Default: 'mcpo-api'
+    Description: 'Name for the Service Connect port mapping (required for client/server mode)'
+  
   MCPOApiKey:
     Type: String
     NoEcho: true
@@ -318,6 +323,7 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+              Name: !Ref ServiceConnectPortName
           # MCPO command construction based on mode
           Command: !If
             - IsConfigFileMode
