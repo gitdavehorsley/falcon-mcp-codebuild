@@ -1,0 +1,65 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time", "--local-timezone=America/New_York"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "weather": {
+      "command": "uvx",
+      "args": ["mcp-server-weather"]
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path=/tmp/example.db"]
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "your-brave-api-key-here"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "your-github-token-here"
+      }
+    },
+    "slack": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "env": {
+        "SLACK_BOT_TOKEN": "xoxb-your-slack-bot-token",
+        "SLACK_TEAM_ID": "your-team-id"
+      }
+    },
+    "postgres": {
+      "command": "uvx",
+      "args": ["mcp-server-postgres", "postgresql://user:password@localhost/dbname"]
+    },
+    "sse_server": {
+      "type": "sse",
+      "url": "http://127.0.0.1:8001/sse",
+      "headers": {
+        "Authorization": "Bearer your-sse-token",
+        "X-Custom-Header": "custom-value"
+      }
+    },
+    "streamable_http_server": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8002/mcp",
+      "headers": {
+        "Authorization": "Bearer your-http-token"
+      }
+    }
+  }
+}

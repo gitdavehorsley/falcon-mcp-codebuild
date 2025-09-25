@@ -1,0 +1,463 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Task Definition for MCPO MCP-to-OpenAPI Proxy Server'
+
+Parameters:
+  ECRRepositoryURI:
+    Type: String
+    Default: 'ghcr.io/open-webui/mcpo'
+    Description: 'Container image URI for MCPO (default uses public GitHub Container Registry image)'
+  
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+  
+  ProjectName:
+    Type: String
+    Default: mcpo
+    Description: Name of the project
+  
+  ImageTag:
+    Type: String
+    Default: main
+    Description: Docker image tag to use
+  
+  TaskCpu:
+    Type: String
+    Default: '256'
+    AllowedValues:
+      - '256'
+      - '512'
+      - '1024'
+      - '2048'
+      - '4096'
+    Description: 'CPU units for the task (256 = 0.25 vCPU)'
+  
+  TaskMemory:
+    Type: String
+    Default: '512'
+    AllowedValues:
+      - '512'
+      - '1024'
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Description: 'Memory (in MiB) for the task'
+  
+  ContainerPort:
+    Type: Number
+    Default: 8000
+    Description: 'Port that the MCPO server listens on'
+  
+  MCPOApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: 'API key for MCPO authentication (leave empty to auto-generate a secure key and store in Secrets Manager)'
+  
+  MCPServerCommand:
+    Type: String
+    Default: 'uvx mcp-server-time --local-timezone=America/New_York'
+    Description: 'MCP server command to proxy (e.g., "uvx mcp-server-time", "npx -y @modelcontextprotocol/server-memory")'
+  
+  MCPServerType:
+    Type: String
+    Default: 'stdio'
+    AllowedValues:
+      - 'stdio'
+      - 'sse'
+      - 'streamable-http'
+    Description: 'Type of MCP server to connect to'
+  
+  MCPServerURL:
+    Type: String
+    Default: ''
+    Description: 'URL for SSE or Streamable HTTP MCP servers (only used if server type is not stdio)'
+  
+  MCPServerHeaders:
+    Type: String
+    Default: '{}'
+    Description: 'JSON string of headers for SSE/HTTP MCP servers (e.g., {"Authorization": "Bearer token"})'
+  
+  MCPOConfigFile:
+    Type: String
+    Default: ''
+    Description: 'Optional: Path to MCPO config file for multi-server setup (leave empty for single server mode)'
+  
+  EnableHotReload:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: 'Enable hot-reload for config file changes'
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: 'VPC ID where the ECS service will run'
+  
+  WebUISecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: 'Security Group ID of the WebUI server that will access MCPO'
+  
+  AllowedCidrBlocks:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: 'Optional: Additional CIDR blocks allowed to access MCPO (for debugging/admin access)'
+
+Conditions:
+  IsConfigFileMode: !Not [!Equals [!Ref MCPOConfigFile, ""]]
+  IsStdioMode: !Equals [!Ref MCPServerType, "stdio"]
+  IsSSEMode: !Equals [!Ref MCPServerType, "sse"]
+  IsStreamableHttpMode: !Equals [!Ref MCPServerType, "streamable-http"]
+  IsHotReloadEnabled: !Equals [!Ref EnableHotReload, "true"]
+  HasAdditionalCidrBlocks: !Not [!Equals [!Join ["", !Ref AllowedCidrBlocks], ""]]
+  ShouldGenerateApiKey: !Equals [!Ref MCPOApiKey, ""]
+
+Resources:
+  # ================================
+  # Secrets Manager Secret for API Key
+  # ================================
+  MCPOApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}-api-key-${Environment}"
+      Description: !Sub "API key for ${ProjectName} MCPO service"
+      GenerateSecretString: !If
+        - ShouldGenerateApiKey
+        - SecretStringTemplate: '{}'
+          GenerateStringKey: 'apiKey'
+          PasswordLength: 32
+          ExcludeCharacters: '"@/\'
+        - !Ref "AWS::NoValue"
+      SecretString: !If
+        - ShouldGenerateApiKey
+        - !Ref "AWS::NoValue"
+        - !Sub |
+          {
+            "apiKey": "${MCPOApiKey}"
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-api-key-secret"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # ECS Task Execution Role
+  # ================================
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ecs-execution-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECRAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref MCPOApiKeySecret
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-execution-role"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # ECS Task Role (for application permissions)
+  # ================================
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ecs-task-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MCPOPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Basic logging permissions
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              # Permissions for downloading MCP servers (npm, uvx, etc.)
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-task-role"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # CloudWatch Log Group
+  # ================================
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-logs"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # Security Group for ECS Service
+  # ================================
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-ecs-sg-${Environment}"
+      GroupDescription: !Sub "Security group for ${ProjectName} ECS service"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Primary access from WebUI server
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref WebUISecurityGroupId
+          Description: "Allow inbound traffic to MCPO service from WebUI server"
+        # Optional additional CIDR blocks (for debugging/admin access)
+        - !If
+          - HasAdditionalCidrBlocks
+          - IpProtocol: tcp
+            FromPort: !Ref ContainerPort
+            ToPort: !Ref ContainerPort
+            CidrIp: !Select [0, !Ref AllowedCidrBlocks]
+            Description: "Allow inbound traffic to MCPO service from additional CIDR block"
+          - !Ref "AWS::NoValue"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "Allow HTTPS outbound for package downloads and API calls"
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: "Allow HTTP outbound for package downloads and health checks"
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "Allow DNS over TCP"
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "Allow DNS over UDP"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ecs-security-group"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ================================
+  # ECS Task Definition
+  # ================================
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${ProjectName}-container"
+          Image: !Sub "${ECRRepositoryURI}:${ImageTag}"
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          # MCPO command construction based on mode
+          Command: !If
+            - IsConfigFileMode
+            # Config file mode
+            - - "--config"
+              - !Ref MCPOConfigFile
+              - !If
+                - IsHotReloadEnabled
+                - "--hot-reload"
+                - !Ref "AWS::NoValue"
+              - "--port"
+              - !Ref ContainerPort
+              - "--api-key"
+              - "$MCPO_API_KEY"
+            # Single server mode
+            - !If
+              - IsStdioMode
+              # Stdio mode - simple command passthrough
+              - - "--port"
+                - !Ref ContainerPort
+                - "--api-key"
+                - !Ref MCPOApiKey
+                - "--"
+                - !Ref MCPServerCommand
+              # SSE or Streamable HTTP mode
+              - - "--port"
+                - !Ref ContainerPort
+                - "--api-key"
+                - !Ref MCPOApiKey
+                - "--server-type"
+                - !Ref MCPServerType
+                - !If
+                  - IsSSEMode
+                  - "--header"
+                  - !Ref "AWS::NoValue"
+                - !If
+                  - IsSSEMode
+                  - !Ref MCPServerHeaders
+                  - !Ref "AWS::NoValue"
+                - "--"
+                - !Ref MCPServerURL
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: MCPO_API_KEY
+              ValueFrom: !Sub "${MCPOApiKeySecret}:apiKey::"
+          Environment:
+            - Name: MCPO_PORT
+              Value: !Ref ContainerPort
+          # Health check
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - !Sub "curl -f -H 'Authorization: Bearer $MCPO_API_KEY' http://localhost:${ContainerPort}/docs || exit 1"
+            Interval: 30
+            Timeout: 10
+            Retries: 3
+            StartPeriod: 60
+          # Resource requirements
+          Memory: !Ref TaskMemory
+          MemoryReservation: !Ref TaskMemory
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-task-definition"
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ECSTaskDefinitionArn:
+    Description: ARN of the ECS Task Definition
+    Value: !Ref ECSTaskDefinition
+    Export:
+      Name: !Sub "${ProjectName}-task-definition-arn-${Environment}"
+
+  ECSTaskDefinitionFamily:
+    Description: Family name of the ECS Task Definition
+    Value: !Sub "${ProjectName}-${Environment}"
+    Export:
+      Name: !Sub "${ProjectName}-task-definition-family-${Environment}"
+
+  ECSTaskExecutionRoleArn:
+    Description: ARN of the ECS Task Execution Role
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ecs-execution-role-arn-${Environment}"
+
+  ECSTaskRoleArn:
+    Description: ARN of the ECS Task Role
+    Value: !GetAtt ECSTaskRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ecs-task-role-arn-${Environment}"
+
+  ECSLogGroupName:
+    Description: Name of the CloudWatch Log Group
+    Value: !Ref ECSLogGroup
+    Export:
+      Name: !Sub "${ProjectName}-ecs-log-group-${Environment}"
+
+  ContainerImage:
+    Description: Container image used in the task definition
+    Value: !Sub "${ECRRepositoryURI}:${ImageTag}"
+    Export:
+      Name: !Sub "${ProjectName}-container-image-${Environment}"
+
+  ECSSecurityGroupId:
+    Description: ID of the ECS Security Group
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-ecs-security-group-id-${Environment}"
+
+  ECSSecurityGroupArn:
+    Description: ARN of the ECS Security Group
+    Value: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${ECSSecurityGroup}"
+    Export:
+      Name: !Sub "${ProjectName}-ecs-security-group-arn-${Environment}"
+
+  MCPOServiceEndpoint:
+    Description: MCPO service endpoint URL (use with load balancer DNS)
+    Value: !Sub "http://your-load-balancer-dns:${ContainerPort}"
+    Export:
+      Name: !Sub "${ProjectName}-service-endpoint-${Environment}"
+
+  MCPODocsEndpoint:
+    Description: MCPO interactive docs endpoint
+    Value: !Sub "http://your-load-balancer-dns:${ContainerPort}/docs"
+    Export:
+      Name: !Sub "${ProjectName}-docs-endpoint-${Environment}"
+
+  MCPOApiKeySecretArn:
+    Description: ARN of the Secrets Manager secret containing the MCPO API key
+    Value: !Ref MCPOApiKeySecret
+    Export:
+      Name: !Sub "${ProjectName}-api-key-secret-arn-${Environment}"
+
+  MCPOApiKeySecretName:
+    Description: Name of the Secrets Manager secret containing the MCPO API key
+    Value: !Sub "${ProjectName}-api-key-${Environment}"
+    Export:
+      Name: !Sub "${ProjectName}-api-key-secret-name-${Environment}"
